@@ -151,6 +151,19 @@
   .fam:first-child { margin-top: 0; }
   dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px; max-width: 760px; width: 92vw; padding: 0; }
   dialog::backdrop { background: #0009; }
+  .about-btn { flex: none; padding: 5px 12px; }
+  .about h3 { margin: 16px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+  .about p, .about li { font-size: 13.5px; line-height: 1.55; max-width: 68ch; }
+  .about p { margin: 0 0 8px; }
+  .about ol, .about ul { margin: 0 0 8px; padding-left: 20px; }
+  .about table { border-collapse: collapse; width: 100%; font-size: 13px; margin-bottom: 8px; }
+  .about td, .about th { text-align: left; padding: 5px 8px; border-top: 1px solid var(--line); vertical-align: top; }
+  .about th { color: var(--muted); font-weight: 600; }
+  .about kbd { background: var(--panel3); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-size: 12px; }
+  .about .stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 10px; }
+  .about .stat { flex: 1 1 140px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .about .stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+  .about .stat span { font-size: 12px; color: var(--muted); }
   .guide { padding: 16px 18px; max-height: 80vh; overflow: auto; }
   .guide h2 { margin: 0 0 4px; font-size: 16px; }
   .grow { display: grid; grid-template-columns: 70px 1fr; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); align-items: center; }
@@ -175,6 +188,7 @@
   <label>Model<select id="model"></select></label>
   <label>Section<select id="section"></select></label>
   <div class="spacer"></div>
+  <button class="btn about-btn" id="aboutBtn">About this tool</button>
   <div class="pill" id="trainPill"><span class="dot" style="background:var(--muted)"></span>checking GPU…</div>
   <div class="pill" id="ramPill">RAM –</div>
 </header>
@@ -285,6 +299,57 @@
     </div>
   </aside>
 </main>
+<dialog id="about"><div class="guide about">
+  <div class="row"><h2>About Cell Review Studio</h2><button class="btn" style="flex:none" onclick="document.getElementById('about').close()">Close</button></div>
+
+  <h3>What it is</h3>
+  <p>A review tool for plant researchers. An AI model outlines every cell in a microscope image of plant tissue (callus). The tool shows where those outlines can be trusted and points the researcher to the spots that are most likely wrong.</p>
+
+  <h3>The problem</h3>
+  <p>One tissue section holds about 1,500 cells. AI segmentation is fast but makes mistakes, such as merging neighbouring cells or skipping whole areas. Checking every cell by hand takes hours, and unchecked mistakes change the cell counts that go into research results.</p>
+
+  <h3>How it works</h3>
+  <ol>
+    <li><b>The AI outlines the cells.</b> We fine-tuned Cellpose-SAM on synthetic images built to look like real plant tissue.</li>
+    <li><b>Our investigator flags likely mistakes.</b> It compares each cell with the image (cell walls, nuclei, size against its neighbours) and with what other models drew, then scores how likely each spot is to be an error.</li>
+    <li><b>The researcher reviews only the flags.</b> About 200 spots per section instead of 1,500 cells, with the most likely mistakes first.</li>
+  </ol>
+
+  <h3>Results on held-out test sections</h3>
+  <div class="stats">
+    <div class="stat"><b>+62%</b><span>accuracy (AP50 0.338 vs 0.209) for our fine-tuned model over stock Cellpose-SAM</span></div>
+    <div class="stat"><b>92%</b><span>of "missed cells" flags were real mistakes</span></div>
+    <div class="stat"><b>~200</b><span>spots to check per section instead of ~1,500 cells</span></div>
+  </div>
+
+  <h3>Reading the screen</h3>
+  <ul>
+    <li><b>Left:</b> choose what to show on the image. PolyT shows cell walls, DAPI shows nuclei.</li>
+    <li><b>Middle:</b> the tissue. With the trust map on, <span style="color:var(--trusted)">green</span> cells are trusted (other models agree), <span style="color:var(--check)">yellow</span> need a check, <span style="color:var(--doubtful)">red</span> are doubtful.</li>
+    <li><b>Right:</b> the cell count, the estimated true count, and the to-do list of flagged spots.</li>
+  </ul>
+
+  <h3>Types of mistakes</h3>
+  <table>
+    <tr><th>Flag</th><th>What it means</th></tr>
+    <tr><td>Merged cells</td><td>One outline covers several cells</td></tr>
+    <tr><td>Missed cells</td><td>Tissue with no outline at all</td></tr>
+    <tr><td>Split cell</td><td>One cell cut into two outlines</td></tr>
+    <tr><td>Tiny fragment</td><td>A sliver drawn as if it were a whole cell</td></tr>
+    <tr><td>Boundary off wall</td><td>The outline misses the visible cell wall</td></tr>
+    <tr><td>Irregular outline</td><td>A jagged, unnatural cell shape</td></tr>
+    <tr><td>Models disagree</td><td>Other models draw this cell very differently</td></tr>
+  </table>
+
+  <h3>How to review</h3>
+  <ol>
+    <li>Click <b>Start review</b>. The view zooms to the first flag.</li>
+    <li>Check whether the outline matches one cell, wall to wall.</li>
+    <li>Press <kbd>A</kbd> for a real error, <kbd>R</kbd> for a false alarm, or <kbd>U</kbd> if unsure. <kbd>J</kbd> / <kbd>K</kbd> move between flags, <kbd>F</kbd> fits the image.</li>
+    <li>Click <b>Export CSV</b> to download every flag with your decisions.</li>
+  </ol>
+  <p class="info">This online demo shows saved results. Running a model live needs the local version with a GPU. Your review decisions are stored only in your browser.</p>
+</div></dialog>
 <dialog id="guide"><div class="guide">
   <div class="row"><h2>Flag guide — what each flag means</h2><button class="btn" style="flex:none" onclick="document.getElementById('guide').close()">Close</button></div>
   <div class="info">Grey = the real cell walls · white = what Cellpose drew. Reliability = share of flags of this kind the reference annotation confirmed on held-out sections.</div>
@@ -777,6 +842,7 @@ async function poll() {
   } catch (e) { /* server restarting */ }
   setTimeout(poll, 5000);
 }
+$("aboutBtn").onclick = () => $("about").showModal();
 init().then(() => {
   $("trainPill").innerHTML = `<span class="dot" style="background:var(--accent)"></span>Demo`;
   $("ramPill").textContent = "Saved results";
