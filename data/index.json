@@ -1,0 +1,119 @@
+{
+  "sections": [
+    "callus_10",
+    "callus_11",
+    "callus_9"
+  ],
+  "models": [
+    {
+      "tag": "E2_test",
+      "name": "E2",
+      "info": "Fine-tuned on biologically calibrated synthetic images",
+      "test_ap50": 0.33843755569790207,
+      "reliability": {
+        "boundary": {
+          "n": 93,
+          "confirmed_rate": 0.47
+        },
+        "disagree": {
+          "n": 101,
+          "confirmed_rate": 0.78
+        },
+        "fragment": {
+          "n": 77,
+          "confirmed_rate": 0.86
+        },
+        "merge": {
+          "n": 101,
+          "confirmed_rate": 0.17
+        },
+        "missed": {
+          "n": 13,
+          "confirmed_rate": 0.92
+        },
+        "shape": {
+          "n": 42,
+          "confirmed_rate": 0.48
+        },
+        "split": {
+          "n": 189,
+          "confirmed_rate": 0.46
+        }
+      }
+    },
+    {
+      "tag": "E1_test",
+      "name": "E1",
+      "info": "Fine-tuned on procedural synthetic images",
+      "test_ap50": 0.23401069617361148,
+      "reliability": {
+        "boundary": {
+          "n": 87,
+          "confirmed_rate": 0.69
+        },
+        "disagree": {
+          "n": 93,
+          "confirmed_rate": 0.95
+        },
+        "fragment": {
+          "n": 45,
+          "confirmed_rate": 0.93
+        },
+        "merge": {
+          "n": 93,
+          "confirmed_rate": 0.26
+        },
+        "missed": {
+          "n": 9,
+          "confirmed_rate": 1.0
+        },
+        "shape": {
+          "n": 4,
+          "confirmed_rate": 0.5
+        },
+        "split": {
+          "n": 125,
+          "confirmed_rate": 0.82
+        }
+      }
+    },
+    {
+      "tag": "E0_test",
+      "name": "E0",
+      "info": "Stock Cellpose-SAM (no fine-tuning)",
+      "test_ap50": 0.20902070439924625,
+      "reliability": {
+        "boundary": {
+          "n": 62,
+          "confirmed_rate": 0.71
+        },
+        "disagree": {
+          "n": 62,
+          "confirmed_rate": 0.79
+        },
+        "fragment": {
+          "n": 38,
+          "confirmed_rate": 0.92
+        },
+        "merge": {
+          "n": 62,
+          "confirmed_rate": 0.31
+        },
+        "missed": {
+          "n": 6,
+          "confirmed_rate": 0.83
+        },
+        "shape": {
+          "n": 20,
+          "confirmed_rate": 0.35
+        },
+        "split": {
+          "n": 65,
+          "confirmed_rate": 0.72
+        }
+      }
+    }
+  ],
+  "best": "E2_test",
+  "live_exp": "E2"
+}

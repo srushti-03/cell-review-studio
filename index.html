@@ -1,0 +1,788 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cell Review Studio</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #151b23; --panel2: #1b222c; --panel3: #222b37; --line: #2a3442; --text: #e6edf3;
+    --muted: #8d9aab; --faint: #5b6778; --accent: #58a6ff; --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+    /* Okabe–Ito colour-blind-safe palette, grouped by what the error does to the cell count:
+       too few cells = warm (vermillion, orange) · too many = blues · outline accuracy = green / yellow · uncertain = purple */
+    --merge: #D55E00; --missed: #E69F00; --split: #0072B2; --fragment: #56B4E9;
+    --boundary: #009E73; --shape: #F0E442; --disagree: #CC79A7; --pred: #ffffff; --ref: #7CFC00;
+    --trusted: #2ecc71; --check: #f1c40f; --doubtful: #e74c3c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13.5px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  button, select, input { font: inherit; color: inherit; }
+  header { display: flex; align-items: center; gap: 14px; padding: 8px 14px; border-bottom: 1px solid var(--line);
+    background: var(--panel); height: 54px; }
+  .brand h1 { font-size: 15px; margin: 0; font-weight: 700; letter-spacing: .2px; }
+  .brand .sub { color: var(--muted); font-size: 12px; }
+  header select { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; max-width: 330px; }
+  header label { color: var(--muted); font-size: 11.5px; display: flex; flex-direction: column; gap: 2px; }
+  .spacer { flex: 1; }
+  .pill { padding: 4px 10px; border-radius: 999px; background: var(--panel2); border: 1px solid var(--line);
+    font-size: 12px; white-space: nowrap; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+  main { display: grid; grid-template-columns: 270px 1fr 400px; height: calc(100% - 54px); }
+  aside { background: var(--panel); overflow: auto; }
+  aside.left { border-right: 1px solid var(--line); padding: 10px; }
+  aside.right { border-left: 1px solid var(--line); display: flex; flex-direction: column; }
+  .card { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+  .card h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); margin: 0 0 8px; font-weight: 650; }
+  .info { color: var(--muted); font-size: 12px; }
+  .seg { display: flex; gap: 4px; margin-bottom: 8px; }
+  .seg button { flex: 1; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 5px; cursor: pointer; }
+  .seg button.on { background: var(--accent); color: #08111f; border-color: var(--accent); font-weight: 650; }
+  label.tg { display: flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer; }
+  label.tg input { accent-color: var(--accent); }
+  label.tg kbd { margin-left: auto; }
+  kbd { background: var(--panel3); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px;
+    padding: 0 5px; font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; }
+  .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: none; }
+  .ftype { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: center; padding: 5px 6px;
+    border-radius: 7px; cursor: pointer; user-select: none; }
+  .ftype:hover { background: var(--panel3); }
+  .ftype.off { opacity: .38; }
+  .ftype .n { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
+  .ftype .rel { display: block; font-size: 11px; color: var(--faint); }
+  .relbar { height: 4px; border-radius: 2px; background: var(--bg); margin-top: 3px; overflow: hidden; }
+  .relbar > i { display: block; height: 100%; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .metric { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  .metric .v { font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .metric .k { color: var(--muted); font-size: 11px; }
+  /* viewer */
+  #viewer { position: relative; overflow: hidden; background: #000; cursor: grab; }
+  #viewer.drag { cursor: grabbing; }
+  #stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  #stage img { position: absolute; left: 0; top: 0; user-select: none; -webkit-user-drag: none; }
+  #pins { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+  #pins circle { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: stroke; cursor: pointer; }
+  #pins circle.sel { stroke-width: 4; }
+  #pins circle.done { stroke-dasharray: 3 3; opacity: .55; }
+  #pins { --k: 1; }
+  #pins circle { opacity: .55; stroke-width: calc(1.5px * var(--k)); }
+  #pins circle.done { stroke-dasharray: calc(3px * var(--k)) calc(3px * var(--k)); }
+  #pins circle.sel { opacity: .9; stroke-width: calc(2px * var(--k)); stroke-dasharray: calc(7px * var(--k)) calc(5px * var(--k)); }
+  #pins .selpoly { fill-opacity: .14; stroke-width: calc(3px * var(--k)); filter: drop-shadow(0 0 2px #000); stroke-linejoin: round; }
+  #pins .cutdot { fill: #fff; stroke: none; }
+  .hud { position: absolute; left: 10px; bottom: 10px; background: #000b; padding: 5px 9px; border-radius: 7px;
+    font-size: 11.5px; color: #c9d1d9; display: flex; gap: 10px; flex-wrap: wrap; max-width: calc(100% - 200px); }
+  #mini { position: absolute; right: 10px; bottom: 10px; width: 170px; border: 1px solid var(--line); background: #000c;
+    border-radius: 6px; overflow: hidden; cursor: pointer; }
+  #mini canvas { display: block; width: 100%; }
+  .legend { position: absolute; left: 10px; top: 10px; background: #000b; border-radius: 7px; padding: 6px 9px;
+    font-size: 11.5px; display: none; }
+  .legend.show { display: block; }
+  /* right panel */
+  .health { padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .health .big { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .tbar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin: 8px 0 4px; background: var(--bg); }
+  .tbar > i { display: block; height: 100%; }
+  .tlegend { display: flex; gap: 12px; font-size: 11.5px; color: var(--muted); flex-wrap: wrap; }
+  .impact { margin-top: 8px; padding: 7px 9px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; font-size: 12.5px; }
+  .progress { padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .pbar { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; margin: 6px 0; border: 1px solid var(--line); }
+  .pbar > i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+  .btnrow { display: flex; gap: 6px; }
+  .btn { flex: 1; border: 1px solid var(--line); background: var(--panel3); border-radius: 8px; padding: 7px 8px;
+    cursor: pointer; font-weight: 600; font-size: 12.5px; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: #08111f; border-color: var(--accent); }
+  .btn.okb.on, .btn.okb:hover { background: #12351d; border-color: var(--ok); color: #7ee2a0; }
+  .btn.badb.on, .btn.badb:hover { background: #3a1416; border-color: var(--bad); color: #ffa198; }
+  .btn.unb.on, .btn.unb:hover { background: #3a2e10; border-color: var(--warn); color: #f2cc60; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  #queue { overflow: auto; flex: 1; }
+  .item { display: grid; grid-template-columns: 64px 1fr; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line);
+    cursor: pointer; position: relative; }
+  .item:hover { background: var(--panel2); }
+  .item.sel { background: var(--panel3); box-shadow: inset 3px 0 0 var(--accent); }
+  .item canvas { width: 64px; height: 64px; border-radius: 6px; background: #000; border: 2px solid; }
+  .item .t { font-weight: 650; font-size: 12.8px; display: flex; justify-content: space-between; gap: 6px; }
+  .item .r { color: var(--muted); font-size: 12px; margin-top: 1px; display: -webkit-box; -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical; overflow: hidden; }
+  .item .meta { display: flex; gap: 6px; margin-top: 3px; flex-wrap: wrap; font-size: 11px; }
+  .tag { border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; color: var(--muted); }
+  .tag.okt { color: #7ee2a0; border-color: #1f6f3a; } .tag.badt { color: #ffa198; border-color: #7a2a2a; }
+  .tag.unt { color: #f2cc60; border-color: #6b551a; } .tag.weak { color: var(--faint); }
+  .prob { font-variant-numeric: tabular-nums; }
+  /* inspector */
+  #insp { border-top: 1px solid var(--line); background: var(--panel2); padding: 10px 14px; max-height: 55%; overflow: auto; display: none; }
+  #queue { min-height: 150px; }
+  #insp.show { display: block; }
+  #insp .head { display: flex; gap: 10px; align-items: center; }
+  #insp .head canvas { width: 120px; height: 120px; border-radius: 8px; background: #000; border: 2px solid; flex: none; }
+  #insp h3 { margin: 0; font-size: 14px; }
+  .ev { display: grid; grid-template-columns: 1fr 90px; gap: 2px 10px; align-items: center; margin-top: 8px; font-size: 12px; }
+  .ev .lab { color: var(--text); }
+  .ev .txt { grid-column: 1 / -1; color: var(--muted); font-size: 11.5px; margin-bottom: 3px; }
+  .ev .bar { height: 7px; border-radius: 4px; background: var(--bg); overflow: hidden; border: 1px solid var(--line); }
+  .ev .bar > i { display: block; height: 100%; }
+  .fix { margin-top: 8px; padding: 7px 9px; border-left: 3px solid var(--accent); background: var(--bg); border-radius: 4px; font-size: 12.5px; }
+  #imgPred { filter: grayscale(1) brightness(1.8); opacity: .85; }
+  .clegend { position: absolute; right: 10px; top: 10px; background: #000b; border-radius: 8px; padding: 6px 9px; font-size: 11.5px;
+    display: grid; grid-template-columns: auto auto; gap: 2px 12px; z-index: 2; }
+  .clegend span { white-space: nowrap; }
+  #whyStrip.show ~ .clegend { display: none; }
+  #whyStrip { position: absolute; left: 10px; right: 10px; top: 10px; background: #0d1117ee; border: 1px solid var(--line);
+    border-radius: 10px; padding: 8px; display: none; backdrop-filter: blur(4px); z-index: 3; }
+  #whyStrip.show { display: block; }
+  #whyStrip .look { flex: 1; border: 0; background: transparent; padding: 0 4px; }
+  .look { display: flex; gap: 10px; align-items: center; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 8px; font-size: 12.3px; }
+  .look svg { flex: none; }
+  .panels { display: grid; grid-template-columns: repeat(4, minmax(0, 210px)); gap: 8px; margin-top: 6px; justify-content: start; }
+  .panel { background: #000; border-radius: 7px; overflow: hidden; border: 1px solid var(--line); position: relative; }
+  .panel canvas { width: 100%; aspect-ratio: 1; display: block; }
+  .panel .cap { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(transparent, #000d);
+    font-size: 11.3px; padding: 10px 6px 4px; color: #e6edf3; }
+  .panel .cap b { font-weight: 650; }
+  .keyev { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+  .keyev span { font-size: 11.5px; border-radius: 999px; padding: 2px 8px; border: 1px solid; }
+  .fam { font-size: 10.5px; text-transform: uppercase; letter-spacing: .6px; color: var(--faint); margin: 8px 0 2px 6px; }
+  .fam:first-child { margin-top: 0; }
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px; max-width: 760px; width: 92vw; padding: 0; }
+  dialog::backdrop { background: #0009; }
+  .guide { padding: 16px 18px; max-height: 80vh; overflow: auto; }
+  .guide h2 { margin: 0 0 4px; font-size: 16px; }
+  .grow { display: grid; grid-template-columns: 70px 1fr; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); align-items: center; }
+  .grow h3 { margin: 0; font-size: 13.5px; display: flex; align-items: center; gap: 6px; }
+  .note { width: 100%; margin-top: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; resize: vertical; min-height: 34px; }
+  .live .progress2 { height: 6px; background: var(--bg); border-radius: 4px; overflow: hidden; margin-top: 8px; border: 1px solid var(--line); }
+  .live .progress2 > div { height: 100%; background: var(--accent); width: 0; transition: width .5s; }
+  .notice { color: var(--warn); }
+  .okc { color: var(--ok); }
+  .empty { padding: 18px 14px; color: var(--muted); }
+  @media (max-width: 1250px) { main { grid-template-columns: 230px 1fr 340px; } }
+  @media (max-width: 980px) { main { grid-template-columns: 1fr; grid-template-rows: auto 55vh auto; height: auto; }
+    aside.left, aside.right { border: 0; } #viewer { height: 55vh; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <h1>Cell Review Studio</h1>
+    <div class="sub">Find and fix Cellpose segmentation errors · plant callus sections</div>
+  </div>
+  <label>Model<select id="model"></select></label>
+  <label>Section<select id="section"></select></label>
+  <div class="spacer"></div>
+  <div class="pill" id="trainPill"><span class="dot" style="background:var(--muted)"></span>checking GPU…</div>
+  <div class="pill" id="ramPill">RAM –</div>
+</header>
+<main>
+  <aside class="left">
+    <div class="card">
+      <h2>View</h2>
+      <div class="seg"><button id="chPolyt" class="on">PolyT (RNA)</button><button id="chDapi">DAPI (nuclei)</button></div>
+      <label class="tg"><input type="checkbox" id="lyPred" checked><span class="sw" style="background:var(--pred)"></span>Cellpose outlines<kbd>O</kbd></label>
+      <label class="tg"><input type="checkbox" id="lyFocus" checked><span class="sw" style="background:linear-gradient(90deg,var(--merge),var(--split),var(--boundary))"></span>Flagged outlines (in flag colour)<kbd>L</kbd></label>
+      <label class="tg"><input type="checkbox" id="lyPins" checked><span class="sw" style="border:2px solid var(--disagree)"></span>Flag markers<kbd>M</kbd></label>
+      <label class="tg"><input type="checkbox" id="lyFlags"><span class="sw" style="background:linear-gradient(90deg,var(--merge),var(--split),var(--missed),var(--disagree))"></span>Flagged-area shading</label>
+      <label class="tg"><input type="checkbox" id="lyTrust"><span class="sw" style="background:linear-gradient(90deg,var(--trusted),var(--check),var(--doubtful))"></span>Trust map<kbd>T</kbd></label>
+      <label class="tg"><input type="checkbox" id="lyRef"><span class="sw" style="background:var(--ref)"></span>Reference annotation<kbd>G</kbd></label>
+    </div>
+    <div class="card">
+      <div class="row"><h2 style="margin:0">What to show</h2><button class="btn" id="guideBtn" style="flex:none;padding:3px 8px;font-size:11.5px">Flag guide</button></div>
+      <div id="ftypes" style="margin-top:8px"></div>
+      <div class="info" style="margin-top:6px">% = how often this kind of flag was a real error on held-out sections.</div>
+    </div>
+    <div class="card">
+      <h2>Filter &amp; sort</h2>
+      <div class="row"><span>Min. investigator score</span><b id="minPv">0%</b></div>
+      <input type="range" id="minP" min="0" max="95" step="5" value="0">
+      <div class="seg" style="margin-top:6px">
+        <button data-sort="likely" class="on" title="score × how reliable this flag type is">Most likely real</button>
+        <button data-sort="impact" title="largest effect on the cell count first">Biggest impact</button>
+      </div>
+      <label class="tg"><input type="checkbox" id="hideDone">Hide flags I've already reviewed</label>
+      <label class="tg"><input type="checkbox" id="showCheck">Show reference check (✓/✗)</label>
+    </div>
+    <div class="card">
+      <h2>Model accuracy · this section</h2>
+      <div class="metrics" id="metrics"></div>
+      <div class="info" id="modelMacro" style="margin-top:6px"></div>
+      <div class="info" id="modelInfo" style="margin-top:4px"></div>
+    </div>
+    <div class="card live">
+      <h2>Run live</h2>
+      <div class="info" style="margin-bottom:8px">Segment this section with the best model now, then investigate it.</div>
+      <button class="btn primary" id="runBtn" disabled style="width:100%">Run best model live</button>
+      <div class="info" id="liveMsg" style="margin-top:6px"></div>
+      <div class="progress2" id="liveProg" style="display:none"><div></div></div>
+    </div>
+  </aside>
+
+  <section id="viewer">
+    <div id="stage">
+      <img id="imgBase" alt="">
+      <img id="imgTrust" alt="">
+      <img id="imgRef" alt="">
+      <img id="imgFlags" alt="">
+      <img id="imgPred" alt="">
+      <img id="imgFocus" alt="">
+      <svg id="pins"></svg>
+    </div>
+    <div id="whyStrip">
+      <div class="row"><div class="look" id="iLook"></div><button class="btn" id="whyClose" title="hide (W)" style="flex:none;padding:3px 9px">✕</button></div>
+      <div class="panels" id="iPanels"></div>
+      <div class="info" style="margin-top:4px">Bold coloured outline = the flagged mask · white dots = where Cellpose cut a split pair · white = other Cellpose outlines · pink / light blue = other models</div>
+    </div>
+    <div class="legend" id="trustLegend"><span class="dot" style="background:var(--trusted)"></span>trusted — other models agree
+      <br><span class="dot" style="background:var(--check)"></span>check<br><span class="dot" style="background:var(--doubtful)"></span>doubtful — no other model agrees</div>
+    <div class="clegend" id="clegend"></div>
+    <div class="hud"><span>scroll zoom · drag pan</span><span><kbd>J</kbd>/<kbd>K</kbd> next/prev</span>
+      <span><kbd>A</kbd> real error · <kbd>R</kbd> false alarm · <kbd>U</kbd> unsure</span><span><kbd>F</kbd> fit · <kbd>W</kbd> evidence strip</span></div>
+    <div id="mini"><canvas id="miniC"></canvas></div>
+  </section>
+
+  <aside class="right">
+    <div class="health">
+      <div class="row"><div><div class="big" id="hCells">–</div><div class="info" id="hSub"></div></div>
+        <div style="text-align:right"><div class="big" id="hFlags">–</div><div class="info">places to check</div></div></div>
+      <div class="tbar" id="tbar"></div>
+      <div class="tlegend" id="tlegend"></div>
+      <div class="impact" id="impact"></div>
+    </div>
+    <div class="progress">
+      <div class="row"><b id="pText">Reviewed 0</b><span class="info" id="pStats"></span></div>
+      <div class="pbar"><i id="pBar"></i></div>
+      <div class="btnrow">
+        <button class="btn" id="startBtn">Start review ▸</button>
+        <button class="btn" id="exportBtn" title="download every flag with your decisions as CSV">Export CSV</button>
+        <button class="btn" id="resetBtn" title="clear my decisions for this model + section">Reset</button>
+      </div>
+    </div>
+    <div id="queue"></div>
+    <div id="insp">
+      <div class="head">
+        <canvas id="inspC" width="240" height="240"></canvas>
+        <div style="flex:1;min-width:0">
+          <div class="info" id="iRank"></div>
+          <h3 id="iTitle"></h3>
+          <div class="info" id="iScore"></div>
+          <div class="btnrow" style="margin-top:8px">
+            <button class="btn okb" data-d="error">Real error <kbd>A</kbd></button>
+            <button class="btn badb" data-d="fine">False alarm <kbd>R</kbd></button>
+            <button class="btn unb" data-d="unsure">Unsure <kbd>U</kbd></button>
+          </div>
+        </div>
+      </div>
+      <div class="fix" id="iFix"></div>
+      <div class="info" id="iReason" style="margin-top:8px"></div>
+      <div class="keyev" id="iKey"></div>
+      <div class="keyev" id="iAgainst"></div>
+      <details style="margin-top:6px"><summary class="info" style="cursor:pointer">All measured evidence</summary><div class="ev" id="iEv"></div></details>
+      <textarea class="note" id="iNote" placeholder="Note (optional) — e.g. 'wall too faint to call'"></textarea>
+    </div>
+  </aside>
+</main>
+<dialog id="guide"><div class="guide">
+  <div class="row"><h2>Flag guide — what each flag means</h2><button class="btn" style="flex:none" onclick="document.getElementById('guide').close()">Close</button></div>
+  <div class="info">Grey = the real cell walls · white = what Cellpose drew. Reliability = share of flags of this kind the reference annotation confirmed on held-out sections.</div>
+  <div id="guideBody"></div>
+</div></dialog>
+<script>
+// Each flag type: family, colour, a schematic of the failure, and the evidence panels that show WHY.
+// Panel spec: base image ("polyt" | "dapi"), overlays ("pred" = this model, "other" = another model,
+// "ref" = reference annotation), zoom (multiplier of the flag radius) and the question it answers.
+const FAMILIES = {
+  few:     {label: "Too few cells", hint: "count is too low"},
+  many:    {label: "Too many cells", hint: "count is too high"},
+  outline: {label: "Outline accuracy", hint: "count OK, shape wrong"},
+  unsure:  {label: "Uncertain", hint: "models disagree"},
+};
+const SCHEMA = {  // 60x40 schematics: grey = true cell walls, white = what Cellpose drew
+  merge:    `<path d="M30 4V36" stroke="#8d9aab" stroke-width="2" stroke-dasharray="3 2"/><rect x="6" y="4" width="48" height="32" rx="9" fill="none" stroke="#fff" stroke-width="2.5"/><circle cx="18" cy="20" r="3.5" fill="#56B4E9"/><circle cx="42" cy="20" r="3.5" fill="#56B4E9"/>`,
+  missed:   `<rect x="4" y="6" width="22" height="28" rx="7" fill="none" stroke="#fff" stroke-width="2.5"/><rect x="34" y="6" width="22" height="28" rx="7" fill="#E69F0033" stroke="#8d9aab" stroke-width="2" stroke-dasharray="3 2"/><text x="45" y="25" font-size="12" text-anchor="middle" fill="#E69F00">?</text>`,
+  split:    `<rect x="6" y="4" width="48" height="32" rx="9" fill="none" stroke="#8d9aab" stroke-width="2"/><path d="M30 4V36" stroke="#fff" stroke-width="2.5"/><rect x="6" y="4" width="48" height="32" rx="9" fill="none" stroke="#fff" stroke-width="2.5" stroke-dasharray="0"/><circle cx="30" cy="20" r="3.5" fill="#56B4E9"/>`,
+  fragment: `<rect x="6" y="4" width="48" height="32" rx="9" fill="none" stroke="#8d9aab" stroke-width="2"/><rect x="44" y="8" width="8" height="8" rx="3" fill="none" stroke="#fff" stroke-width="2.5"/>`,
+  boundary: `<rect x="10" y="6" width="40" height="28" rx="8" fill="none" stroke="#8d9aab" stroke-width="2"/><rect x="18" y="10" width="40" height="26" rx="8" fill="none" stroke="#fff" stroke-width="2.5"/>`,
+  shape:    `<rect x="8" y="5" width="44" height="30" rx="9" fill="none" stroke="#8d9aab" stroke-width="2"/><path d="M8 20 L14 6 L22 14 L30 4 L36 13 L46 5 L52 20 L44 28 L50 35 L30 30 L18 36 L12 28 Z" fill="none" stroke="#fff" stroke-width="2.2"/>`,
+  disagree: `<rect x="6" y="6" width="34" height="28" rx="8" fill="none" stroke="#fff" stroke-width="2.5"/><rect x="20" y="4" width="34" height="30" rx="8" fill="none" stroke="#CC79A7" stroke-width="2.5" stroke-dasharray="4 2"/>`,
+};
+const P = (t, base, over, zoom = 2.2) => ({t, base, over, zoom});
+const TYPES = {
+  merge:    {label: "Merged cells", family: "few", color: "var(--merge)", desc: "several cells drawn as one",
+             look: "One outline spans two or more cells: look for a wall crossing it and more than one nucleus.",
+             panels: [P("What Cellpose drew", "polyt", ["pred"]), P("Walls inside it? (PolyT)", "polyt", []),
+                      P("Nuclei inside? (DAPI)", "dapi", ["pred"]), P("Another model", "polyt", ["other"])]},
+  missed:   {label: "Missed cells", family: "few", color: "var(--missed)", desc: "tissue with no mask",
+             look: "Tissue with walls and signal, but no outline at all.",
+             panels: [P("What Cellpose drew", "polyt", ["pred"], 1.6), P("Is there tissue? (PolyT)", "polyt", [], 1.6),
+                      P("Nuclei there? (DAPI)", "dapi", [], 1.6), P("Another model", "polyt", ["other"], 1.6)]},
+  split:    {label: "Split cell", family: "many", color: "var(--split)", desc: "one cell drawn as two",
+             look: "Two outlines share a border with no visible wall between them.",
+             panels: [P("What Cellpose drew", "polyt", ["pred"]), P("Wall along the cut? (PolyT)", "polyt", []),
+                      P("One nucleus? (DAPI)", "dapi", ["pred"]), P("Another model", "polyt", ["other"])]},
+  fragment: {label: "Tiny fragment", family: "many", color: "var(--fragment)", desc: "sliver or spurious mask",
+             look: "A mask far smaller than any neighbour — usually a sliver of a real cell or noise.",
+             panels: [P("What Cellpose drew", "polyt", ["pred"], 3.5), P("Close-up", "polyt", ["pred"], 1.4),
+                      P("Is it a cell? (PolyT)", "polyt", [], 3.5), P("Another model", "polyt", ["other"], 3.5)]},
+  boundary: {label: "Boundary off wall", family: "outline", color: "var(--boundary)", desc: "outline not on a visible wall",
+             look: "The outline runs through the cell or the gap instead of along the bright wall.",
+             panels: [P("What Cellpose drew", "polyt", ["pred"]), P("Where are the walls? (PolyT)", "polyt", []),
+                      P("Another model", "polyt", ["other"]), P("Second opinion", "polyt", ["other2"])]},
+  shape:    {label: "Irregular outline", family: "outline", color: "var(--shape)", desc: "jagged / non-convex outline",
+             look: "A jagged or dented outline; plant cells are usually smooth, convex polygons.",
+             panels: [P("What Cellpose drew", "polyt", ["pred"]), P("Real wall shape (PolyT)", "polyt", []),
+                      P("Another model", "polyt", ["other"]), P("Second opinion", "polyt", ["other2"])]},
+  disagree: {label: "Models disagree", family: "unsure", color: "var(--disagree)", desc: "other models draw it differently",
+             look: "Independent models outline this cell very differently, so at least one is wrong.",
+             panels: [P("This model", "polyt", ["pred"]), P("Model 2", "polyt", ["other"]),
+                      P("Model 3", "polyt", ["other2"]), P("Walls only (PolyT)", "polyt", [])]},
+};
+const schematic = (k, w = 60) => `<svg viewBox="0 0 60 40" width="${w}" height="${w * 2 / 3}" aria-hidden="true">${SCHEMA[k]}</svg>`;
+const $ = id => document.getElementById(id);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v.replace(/var\((.*)\)/, "$1")).trim();
+const fmt = (v, d = 3) => (v === null || v === undefined || Number.isNaN(+v)) ? "–" : Number(v).toFixed(d);
+const pct = v => (v === null || v === undefined) ? "–" : `${Math.round(100 * v)}%`;
+const store = {get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch (e) { return d; } },
+               set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }};
+
+let INDEX = null, REVIEW = null, channel = "polyt", sortBy = "likely", selId = null, view = {s: 1, x: 0, y: 0};
+let typeOn = store.get("typeOn", Object.fromEntries(Object.keys(TYPES).map(k => [k, 1])));
+let imgW = 1500, imgH = 1500, DEC = {}, visible = [];
+const decKey = () => `dec:${$("model").value}:${$("section").value}`;
+
+async function getJSON(u) { const r = await fetch(u, {cache: "no-store"}); if (!r.ok) throw new Error(u); return r.json(); }
+
+async function init() {
+  INDEX = await getJSON("data/index.json");
+  const ms = $("model"), keep = ms.value || store.get("model", null);
+  ms.innerHTML = INDEX.models.map(m => `<option value="${m.tag}">${m.name}${m.tag === INDEX.best ? " ★ best" : ""}${m.test_ap50 ? ` · AP50 ${fmt(m.test_ap50)}` : ""}</option>`).join("");
+  ms.value = INDEX.models.some(m => m.tag === keep) ? keep : INDEX.best;
+  const ss = $("section");
+  if (!ss.options.length) {
+    ss.innerHTML = INDEX.sections.map(s => `<option value="${s}">${s.replace("_", " ")}</option>`).join("");
+    const q = new URLSearchParams(location.search);  // deep link: ?model=E2_test&flag=callus_11:merge:1487
+    if (q.get("model") && INDEX.models.some(m => m.tag === q.get("model"))) ms.value = q.get("model");
+    const fs = (q.get("flag") || "").split(":")[0]; if (INDEX.sections.includes(fs)) ss.value = fs;
+  }
+  await load();
+}
+
+async function load() {
+  const tag = $("model").value, sid = $("section").value;
+  store.set("model", tag);
+  const m = INDEX.models.find(x => x.tag === tag);
+  $("modelInfo").textContent = m ? m.info : "";
+  try { REVIEW = await getJSON(`data/models/${tag}/${sid}/review.json`); }
+  catch (e) { REVIEW = {items: [], metrics: {}, n_cells: 0, summary: {}}; }
+  DEC = store.get(decKey(), {});
+  const base = `data/sections/${sid}`;
+  $("imgBase").src = `${base}/${channel}.jpg`;
+  $("imgRef").src = `${base}/reference.png`;
+  $("imgPred").src = `data/models/${tag}/${sid}/outlines.png`;
+  $("imgFlags").src = `data/models/${tag}/${sid}/flags.png`;
+  $("imgTrust").src = `data/models/${tag}/${sid}/trust.png`;
+  $("imgFocus").src = `data/models/${tag}/${sid}/flag_outlines.png`;
+  $("imgFocus").onerror = () => $("imgFocus").removeAttribute("src");
+  $("imgTrust").onerror = () => { $("imgTrust").removeAttribute("src"); $("lyTrust").disabled = true; $("lyTrust").parentElement.title = "trust map not rendered yet for this model"; };
+  $("imgTrust").onload = () => { $("lyTrust").disabled = false; $("lyTrust").parentElement.title = ""; };
+  $("imgBase").onload = () => { imgW = $("imgBase").naturalWidth; imgH = $("imgBase").naturalHeight;
+    $("pins").setAttribute("width", imgW); $("pins").setAttribute("height", imgH);
+    if (!view.init) fit(); view.init = 1; drawMini(); render();
+    const q = new URLSearchParams(location.search);  // deep links: ?select=1 (top flag) or ?flag=<id>
+    if (!load.deep && (q.get("flag") || q.get("select"))) { load.deep = 1;
+      const want = q.get("flag") || (visible[0] && visible[0].id); if (want) setTimeout(() => select(want), 300); } };
+  loadEvidenceImages(tag, sid);
+  layers(); metrics(); health(); filters(); render();
+}
+
+// ---- offscreen layers for the evidence panels
+const IMG = {}, TINT = {};
+function loadImg(key, url) {
+  return new Promise(res => { const im = new Image(); im.onload = () => { IMG[key] = im; delete TINT[key]; res(); };
+    im.onerror = () => { delete IMG[key]; res(); }; im.src = url; });
+}
+function otherTags(tag) {
+  const names = (REVIEW.other_models || []).map(n => `${n}_test`);
+  const pool = [...names, ...INDEX.models.map(m => m.tag)].filter((t, i, a) => t !== tag && a.indexOf(t) === i && INDEX.models.some(m => m.tag === t));
+  return pool.slice(0, 2);
+}
+let OTHER_NAMES = [];
+async function loadEvidenceImages(tag, sid) {
+  const o = otherTags(tag);
+  OTHER_NAMES = o.map(t => t.replace("_test", ""));
+  await Promise.all([loadImg("polyt", `data/sections/${sid}/polyt.jpg`), loadImg("dapi", `data/sections/${sid}/dapi.jpg`),
+    loadImg("pred", `data/models/${tag}/${sid}/outlines.png`), loadImg("ref", `data/sections/${sid}/reference.png`),
+    loadImg("focus", `data/models/${tag}/${sid}/flag_outlines.png`),
+    o[0] ? loadImg("other", `data/models/${o[0]}/${sid}/outlines.png`) : null,
+    o[1] ? loadImg("other2", `data/models/${o[1]}/${sid}/outlines.png`) : null]);
+  const it = (REVIEW.items || []).find(i => i.id === selId); if (it) inspector(it);
+  thumbObserver();
+}
+function tinted(key, color) {  // recolour an outline layer (source pixels -> one colour)
+  const k = `${key}|${color}`; if (TINT[k]) return TINT[k];
+  const im = IMG[key]; if (!im) return null;
+  const c = document.createElement("canvas"); c.width = im.naturalWidth; c.height = im.naturalHeight;
+  const x = c.getContext("2d"); x.drawImage(im, 0, 0); x.globalCompositeOperation = "source-in"; x.fillStyle = color; x.fillRect(0, 0, c.width, c.height);
+  return (TINT[k] = c);
+}
+const OVER = {pred: ["pred", "#ffffff", []], other: ["other", "#CC79A7", [5, 3]], other2: ["other2", "#56B4E9", [5, 3]], ref: ["ref", "#7CFC00", []]};
+function drawGeom(ctx, it, sx, sy, s, W, {lw = 3, cut = true} = {}) {
+  const k = W / s, col = css(TYPES[it.type].color);
+  const path = poly => { ctx.beginPath(); poly.forEach(([x, y], n) => (n ? ctx.lineTo : ctx.moveTo).call(ctx, (x - sx) * k, (y - sy) * k)); ctx.closePath(); };
+  (it.poly || []).filter(p => p && p.length > 2).forEach(p => {
+    path(p); ctx.lineJoin = "round";
+    ctx.strokeStyle = "#000"; ctx.lineWidth = lw + 3; ctx.stroke();   // dark halo so it reads on bright tissue
+    ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.stroke();
+    ctx.fillStyle = col + "22"; ctx.fill();
+  });
+  if (cut && it.cut && it.cut.length) {  // the border Cellpose cut along (split pairs)
+    ctx.fillStyle = "#fff";
+    it.cut.forEach(([x, y]) => { ctx.beginPath(); ctx.arc((x - sx) * k, (y - sy) * k, Math.max(1.6, lw * .55), 0, 2 * Math.PI); ctx.fill(); });
+  }
+  return !!(it.poly && it.poly.length);
+}
+function drawPanel(canvas, it, spec) {
+  const base = IMG[spec.base]; const ctx = canvas.getContext("2d"), W = canvas.width;
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, W);
+  if (!base) return false;
+  const R = Math.max(26, it.r * spec.zoom), sx = it.x - R, sy = it.y - R, s = 2 * R;
+  ctx.imageSmoothingEnabled = s < W;
+  ctx.drawImage(base, sx, sy, s, s, 0, 0, W, W);
+  let ok = true;
+  for (const o of spec.over) {
+    const [key, col] = OVER[o]; const lay = tinted(key, col);
+    if (!lay) { ok = false; continue; }
+    ctx.globalAlpha = o === "pred" ? 0.95 : 0.9; ctx.drawImage(lay, sx, sy, s, s, 0, 0, W, W); ctx.globalAlpha = 1;
+  }
+  // the flagged item itself: bold on panels showing this model, thin "ghost" on comparison panels
+  if (!drawGeom(ctx, it, sx, sy, s, W, spec.over.includes("pred") ? {lw: 3} : {lw: 1.2, cut: false})) {
+    ctx.setLineDash([6, 5]); ctx.strokeStyle = css(TYPES[it.type].color); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(W / 2, W / 2, (it.r / s) * W * 1.15, 0, 2 * Math.PI); ctx.stroke(); ctx.setLineDash([]);
+  }
+  return ok;
+}
+
+function layers() {
+  [["imgPred", "lyPred"], ["imgFlags", "lyFlags"], ["imgRef", "lyRef"], ["imgTrust", "lyTrust"], ["imgFocus", "lyFocus"]].forEach(([i, c]) =>
+    $(i).style.display = $(c).checked ? "" : "none");
+  $("pins").style.display = $("lyPins").checked ? "" : "none";
+  $("trustLegend").classList.toggle("show", $("lyTrust").checked);
+}
+
+function metrics() {
+  const mm = REVIEW.metrics || {};
+  const cell = (k, label) => `<div class="metric"><div class="v">${fmt(mm[k])}</div><div class="k">${label}</div></div>`;
+  $("metrics").innerHTML = cell("AP50", "AP50") + cell("F1", "F1 @ IoU 0.5") + cell("Precision", "Precision") + cell("Recall", "Recall");
+  const s = REVIEW.summary || {};
+  $("modelMacro").textContent = s["macro AP50"] ? `All 3 test sections: AP50 ${fmt(s["macro AP50"])}, F1 ${fmt(s["macro F1"])}` : "";
+}
+
+function health() {
+  const S = REVIEW.section || {}, tr = S.trust || {}, n = S.n_cells || REVIEW.n_cells || 0;
+  $("hCells").textContent = n ? `${n.toLocaleString()} cells` : "–";
+  $("hSub").textContent = S.est_true_count ? `estimated true count ≈ ${S.est_true_count.toLocaleString()}` : "found by Cellpose";
+  $("hFlags").textContent = (REVIEW.items || []).length;
+  const tot = (tr.trusted || 0) + (tr.check || 0) + (tr.doubtful || 0);
+  $("tbar").innerHTML = tot ? ["trusted", "check", "doubtful"].map(k => `<i style="width:${100 * (tr[k] || 0) / tot}%;background:var(--${k})" title="${k}: ${tr[k]}"></i>`).join("") : "";
+  const er = S.trust_error_rate || {};
+  $("tlegend").innerHTML = tot ? ["trusted", "check", "doubtful"].map(k =>
+    `<span><span class="dot" style="background:var(--${k})"></span>${k} ${pct((tr[k] || 0) / tot)}${er[k] != null ? ` <span title="share of these cells the reference disagrees with">(ref. disagrees ${pct(er[k])})</span>` : ""}</span>`).join("") : "";
+  const d = S.count_delta_if_all_fixed;
+  $("impact").innerHTML = d === undefined ? "Rebuild the review data to see the count impact." :
+    `If every flag is a real error and gets fixed, the cell count changes by <b>${d > 0 ? "+" : ""}${d}</b> ` +
+    `(${pct(Math.abs(d) / Math.max(n, 1))} of the total). Your decisions below refine this estimate.`;
+}
+
+function filters() {
+  const counts = {}; (REVIEW.items || []).forEach(i => counts[i.type] = (counts[i.type] || 0) + 1);
+  const rel = REVIEW.reliability || {};
+  let lastFam = null;
+  $("ftypes").innerHTML = Object.entries(TYPES).map(([k, t]) => {
+    const r = rel[k]?.confirmed_rate;
+    const head = t.family !== lastFam ? `<div class="fam">${FAMILIES[t.family].label} · ${FAMILIES[t.family].hint}</div>` : "";
+    lastFam = t.family;
+    return head + `<div class="ftype ${typeOn[k] ? "" : "off"}" data-t="${k}" title="${t.desc}">
+      <span class="sw" style="background:${t.color}"></span>
+      <span>${t.label}<span class="rel">${r != null ? `real ${pct(r)} of the time` : "reliability not measured"}</span>
+        <span class="relbar"><i style="width:${100 * (r || 0)}%;background:${t.color}"></i></span></span>
+      <span class="n">${counts[k] || 0}</span></div>`;
+  }).join("");
+  document.querySelectorAll(".ftype").forEach(el => el.onclick = () => { typeOn[el.dataset.t] ^= 1; store.set("typeOn", typeOn); filters(); render(); });
+}
+
+function legend() {
+  $("clegend").innerHTML = Object.entries(TYPES).filter(([k]) => typeOn[k]).map(([k, t]) =>
+    `<span><span class="dot" style="background:${t.color}"></span>${t.label}</span>`).join("");
+}
+function likely(i) { const r = (REVIEW.reliability || {})[i.type]?.confirmed_rate; return (i.p || 0) * (r ?? 0.5); }
+
+function render() {
+  const minP = +$("minP").value / 100, hide = $("hideDone").checked, show = $("showCheck").checked;
+  $("minPv").textContent = `${Math.round(minP * 100)}%`;
+  visible = (REVIEW.items || []).filter(i => typeOn[i.type] && (i.p || 0) >= minP && !(hide && DEC[i.id]));
+  visible.sort(sortBy === "impact" ? (a, b) => Math.abs(b.count_delta) - Math.abs(a.count_delta) || likely(b) - likely(a)
+                                   : (a, b) => likely(b) - likely(a));
+  const rel = REVIEW.reliability || {};
+  $("queue").innerHTML = visible.map(i => {
+    const d = DEC[i.id]?.d, r = rel[i.type]?.confirmed_rate;
+    return `<div class="item ${i.id === selId ? "sel" : ""}" data-id="${i.id}">
+      <canvas width="128" height="128" style="border-color:${TYPES[i.type].color}" data-id="${i.id}"></canvas>
+      <div><div class="t"><span>${TYPES[i.type].label}</span><span class="prob" title="investigator score">${pct(i.p)}</span></div>
+        <div class="r">${i.reason}</div>
+        <div class="meta">
+          ${r != null && r < 0.4 ? `<span class="tag weak" title="this flag type was right only ${pct(r)} of the time">low-reliability type</span>` : ""}
+          ${i.count_delta ? `<span class="tag" title="effect on the cell count if fixed">${i.count_delta > 0 ? "+" : ""}${i.count_delta} cells</span>` : ""}
+          ${d === "error" ? `<span class="tag okt">✓ real error</span>` : d === "fine" ? `<span class="tag badt">✗ false alarm</span>` : d === "unsure" ? `<span class="tag unt">? unsure</span>` : ""}
+          ${show ? `<span class="tag ${i.confirmed ? "okt" : ""}">${i.confirmed ? "reference ✓" : "reference ✗"}</span>` : ""}
+        </div></div></div>`;
+  }).join("") || `<div class="empty">No flags match these filters.</div>`;
+  document.querySelectorAll(".item").forEach(el => el.onclick = () => select(el.dataset.id));
+  thumbObserver();
+  pins(); progress(); legend();
+  if (selId && !visible.some(i => i.id === selId)) { $("insp").classList.remove("show"); }
+}
+
+function pins() {
+  const svg = $("pins");
+  const sel = visible.find(i => i.id === selId);
+  const geom = sel ? (sel.poly || []).filter(p => p && p.length > 2).map(p =>
+      `<polygon points="${p.map(q => q.join(",")).join(" ")}" class="selpoly" stroke="${css(TYPES[sel.type].color)}"/>`).join("") +
+    (sel.cut || []).map(([x, y]) => `<circle cx="${x}" cy="${y}" r="1.2" class="cutdot"/>`).join("") : "";
+  svg.innerHTML = geom + visible.map(i => `<circle cx="${i.x}" cy="${i.y}" r="${i.r}" stroke="${css(TYPES[i.type].color)}"
+      class="${i.id === selId ? "sel" : ""} ${DEC[i.id] ? "done" : ""}" data-id="${i.id}"><title>${TYPES[i.type].label} · ${pct(i.p)}</title></circle>`).join("");
+  svg.querySelectorAll(".selpoly").forEach(p => p.setAttribute("fill", p.getAttribute("stroke")));
+  svg.querySelectorAll(".cutdot").forEach(c => c.setAttribute("r", (2.2 / view.s).toFixed(3)));
+  svg.querySelectorAll("circle[data-id]").forEach(c => c.addEventListener("mousedown", e => { e.stopPropagation(); select(c.dataset.id); }));
+}
+
+function progress() {
+  const all = REVIEW.items || [], done = all.filter(i => DEC[i.id]);
+  const err = done.filter(i => DEC[i.id].d === "error"), fine = done.filter(i => DEC[i.id].d === "fine");
+  $("pText").textContent = `Reviewed ${done.length} / ${all.length}`;
+  $("pBar").style.width = `${100 * done.length / Math.max(all.length, 1)}%`;
+  const delta = err.reduce((s, i) => s + i.count_delta, 0);
+  $("pStats").innerHTML = done.length ? `<span class="okc">${err.length} real</span> · ${fine.length} false alarms · count ${delta >= 0 ? "+" : ""}${delta}` : "";
+  $("startBtn").textContent = done.length ? "Next unreviewed ▸" : "Start review ▸";
+}
+
+// ---- thumbnails (drawn from the loaded layers; lazy)
+function drawCrop(canvas, it, zoomR) {
+  const base = $("imgBase"); if (!base.complete || !base.naturalWidth) return false;
+  const ctx = canvas.getContext("2d"), W = canvas.width, R = zoomR || Math.max(24, it.r * 1.6);
+  const sx = it.x - R, sy = it.y - R, s = 2 * R;
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, W);
+  ctx.drawImage(base, sx, sy, s, s, 0, 0, W, W);
+  if ($("lyTrust").checked && $("imgTrust").naturalWidth) ctx.drawImage($("imgTrust"), sx, sy, s, s, 0, 0, W, W);
+  if ($("imgPred").naturalWidth) { ctx.globalAlpha = .9; ctx.drawImage($("imgPred"), sx, sy, s, s, 0, 0, W, W); ctx.globalAlpha = 1; }
+  if ($("lyRef").checked && $("imgRef").naturalWidth) ctx.drawImage($("imgRef"), sx, sy, s, s, 0, 0, W, W);
+  if (!drawGeom(ctx, it, sx, sy, s, W, {lw: Math.max(2, W / 50)})) {
+    ctx.strokeStyle = css(TYPES[it.type].color); ctx.lineWidth = Math.max(2, W / 60);
+    ctx.beginPath(); ctx.arc(W / 2, W / 2, (it.r / s) * W, 0, 2 * Math.PI); ctx.stroke();
+  }
+  return true;
+}
+let io = null;
+function thumbObserver() {
+  io?.disconnect();
+  io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) {
+    const it = visible.find(i => i.id === e.target.dataset.id); if (it && drawCrop(e.target, it)) io.unobserve(e.target); } }),
+    {root: $("queue"), rootMargin: "200px"});
+  document.querySelectorAll(".item canvas").forEach(c => io.observe(c));
+}
+
+// ---- selection + inspector
+function select(id) {
+  const it = (REVIEW.items || []).find(i => i.id === id); if (!it) return;
+  selId = id;
+  document.querySelectorAll(".item").forEach(el => el.classList.toggle("sel", el.dataset.id === id));
+  document.querySelector(`.item[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({block: "nearest"});
+  const n0 = visible.findIndex(i => i.id === id);
+  visible.slice(Math.max(0, n0 - 6), n0 + 8).forEach(i => { const c = document.querySelector(`.item canvas[data-id="${CSS.escape(i.id)}"]`); if (c) drawCrop(c, i); });
+  const vw = $("viewer").clientWidth, vh = $("viewer").clientHeight;
+  view.s = Math.min(14, Math.max(view.s, Math.min(vw, vh) / (it.r * 7)));
+  const top = inspector.hidden ? 0 : Math.min(300, vh * 0.42);  // room for the evidence strip
+  view.x = vw / 2 - it.x * view.s; view.y = top + (vh - top) / 2 - it.y * view.s; apply();
+  pins(); inspector(it);
+}
+
+function inspector(it) {
+  const t = TYPES[it.type], rel = (REVIEW.reliability || {})[it.type]?.confirmed_rate;
+  $("insp").classList.add("show");
+  if (!inspector.hidden) $("whyStrip").classList.add("show");
+  $("inspC").style.borderColor = t.color; drawCrop($("inspC"), it, Math.max(30, it.r * 2.2));
+  const n = visible.findIndex(i => i.id === it.id);
+  $("iRank").textContent = `Flag ${n + 1} of ${visible.length} · ${t.desc}`;
+  $("iTitle").innerHTML = `<span class="dot" style="background:${t.color}"></span>${t.label}`;
+  $("iScore").innerHTML = `Investigator score <b>${pct(it.p)}</b>` + (rel != null ? ` · flags of this kind were real errors <b>${pct(rel)}</b> of the time on held-out sections` : "") +
+    (it.count_delta ? ` · fixing it changes the count by <b>${it.count_delta > 0 ? "+" : ""}${it.count_delta}</b>` : "");
+  $("iFix").innerHTML = `<b>Suggested fix:</b> ${it.fix || "check by eye"}`;
+  $("iLook").innerHTML = `${schematic(it.type, 54)}<span><b>What to look for:</b> ${t.look}</span>`;
+  const name = o => o === "other" ? (OTHER_NAMES[0] || "another model") : o === "other2" ? (OTHER_NAMES[1] || "a third model") : "";
+  $("iPanels").innerHTML = t.panels.map((p, k) => {
+    const ttl = p.t.replace("Another model", `Another model (${name("other")})`).replace("Model 2", `Model ${name("other")}`)
+                   .replace("Model 3", `Model ${name("other2")}`).replace("Second opinion", `Second opinion (${name("other2")})`);
+    return `<div class="panel"><canvas width="260" height="260" data-k="${k}"></canvas><div class="cap"><b>${k + 1}.</b> ${ttl}</div></div>`;
+  }).join("");
+  document.querySelectorAll("#iPanels canvas").forEach(c => {
+    const ok = drawPanel(c, it, t.panels[+c.dataset.k]);
+    if (!ok) c.nextElementSibling.innerHTML += ` <span style="color:var(--warn)">(layer missing)</span>`;
+  });
+  const ev = [...(it.evidence || [])].filter(e => e.s != null);
+  const pro = ev.filter(e => e.s >= .5).sort((a, b) => b.s - a.s), con = ev.filter(e => e.s < .25).sort((a, b) => a.s - b.s).slice(0, 3);
+  const chip = (e, c) => `<span style="border-color:${c};color:${c}" title="${e.k}">${e.t}</span>`;
+  $("iKey").innerHTML = pro.length ? `<b class="info" style="width:100%">⚠ Points to an error</b>` + pro.map(e => chip(e, e.s > .75 ? "var(--bad)" : "var(--warn)")).join("") : "";
+  $("iAgainst").innerHTML = con.length ? `<b class="info" style="width:100%">✓ Points against (could be fine)</b>` + con.map(e => chip(e, "var(--ok)")).join("") : "";
+  $("iReason").innerHTML = `<b>Why flagged:</b> ${it.reason}`;
+  $("iEv").innerHTML = (it.evidence || []).map(e => {
+    const s = e.s ?? 0, col = s > .66 ? "var(--bad)" : s > .33 ? "var(--warn)" : "var(--ok)";
+    return `<span class="lab">${e.k}</span><span class="bar" title="how strongly this points to an error"><i style="width:${Math.max(4, 100 * s)}%;background:${col}"></i></span><span class="txt">${e.t}</span>`;
+  }).join("");
+  const d = DEC[it.id]?.d;
+  document.querySelectorAll("#insp [data-d]").forEach(b => b.classList.toggle("on", b.dataset.d === d));
+  $("iNote").value = DEC[it.id]?.note || "";
+}
+
+function decide(d) {
+  if (!selId) return;
+  const prev = DEC[selId] || {};
+  DEC[selId] = {...prev, d, t: new Date().toISOString()};
+  store.set(decKey(), DEC);
+  const idx = visible.findIndex(i => i.id === selId);
+  render();
+  const next = visible.slice(idx + 1).find(i => !DEC[i.id]) || visible.find(i => !DEC[i.id]);
+  if (next) select(next.id); else { const it = (REVIEW.items || []).find(i => i.id === selId); if (it) inspector(it); }
+}
+document.querySelectorAll("#insp [data-d]").forEach(b => b.onclick = () => decide(b.dataset.d));
+$("iNote").oninput = () => { if (!selId) return; DEC[selId] = {...(DEC[selId] || {}), note: $("iNote").value}; store.set(decKey(), DEC); };
+
+// ---- viewer
+function fit() { const vw = $("viewer").clientWidth, vh = $("viewer").clientHeight;
+  view.s = Math.min(vw / imgW, vh / imgH); view.x = (vw - imgW * view.s) / 2; view.y = (vh - imgH * view.s) / 2; apply(); }
+function apply() { $("stage").style.transform = `translate(${view.x}px,${view.y}px) scale(${view.s})`;
+  $("pins").style.setProperty("--k", (1 / view.s).toFixed(4));
+  document.querySelectorAll("#pins .cutdot").forEach(c => c.setAttribute("r", (2.2 / view.s).toFixed(3)));
+  drawMiniRect(); }
+let miniImg = null;
+function drawMini() {
+  const c = $("miniC"), W = 170, H = Math.round(W * imgH / imgW); c.width = W; c.height = H;
+  miniImg = document.createElement("canvas"); miniImg.width = W; miniImg.height = H;
+  miniImg.getContext("2d").drawImage($("imgBase"), 0, 0, W, H); drawMiniRect();
+}
+function drawMiniRect() {
+  if (!miniImg) return;
+  const c = $("miniC"), ctx = c.getContext("2d"), k = c.width / imgW;
+  ctx.drawImage(miniImg, 0, 0);
+  visible.forEach(i => { ctx.fillStyle = css(TYPES[i.type].color); ctx.fillRect(i.x * k - 1, i.y * k - 1, 2.5, 2.5); });
+  const vw = $("viewer").clientWidth, vh = $("viewer").clientHeight;
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5;
+  ctx.strokeRect(-view.x / view.s * k, -view.y / view.s * k, vw / view.s * k, vh / view.s * k);
+}
+$("mini").addEventListener("mousedown", e => { e.stopPropagation();
+  const r = $("miniC").getBoundingClientRect(), k = imgW / r.width;
+  const ix = (e.clientX - r.left) * k, iy = (e.clientY - r.top) * k;
+  view.x = $("viewer").clientWidth / 2 - ix * view.s; view.y = $("viewer").clientHeight / 2 - iy * view.s; apply(); });
+const V = $("viewer");
+V.addEventListener("wheel", e => { e.preventDefault();
+  const r = V.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  const s2 = Math.min(16, Math.max(0.15, view.s * Math.exp(-e.deltaY * 0.0015)));
+  view.x = mx - (mx - view.x) * (s2 / view.s); view.y = my - (my - view.y) * (s2 / view.s); view.s = s2; apply(); }, {passive: false});
+let drag = null;
+V.addEventListener("mousedown", e => { drag = {x: e.clientX - view.x, y: e.clientY - view.y}; V.classList.add("drag"); });
+addEventListener("mouseup", () => { drag = null; V.classList.remove("drag"); });
+addEventListener("mousemove", e => { if (drag) { view.x = e.clientX - drag.x; view.y = e.clientY - drag.y; apply(); } });
+addEventListener("resize", () => { const it = (REVIEW?.items || []).find(i => i.id === selId); it ? select(it.id) : fit(); });
+
+// ---- keyboard
+addEventListener("keydown", e => {
+  if (["SELECT", "TEXTAREA", "INPUT"].includes(e.target.tagName) && e.target.type !== "checkbox" && e.target.type !== "range") return;
+  const k = e.key.toLowerCase(), idx = visible.findIndex(i => i.id === selId);
+  const tog = id => { $(id).checked = !$(id).checked; layers(); };
+  if (k === "f") fit();
+  else if (k === "j") visible.length && select(visible[(idx + 1) % visible.length].id);
+  else if (k === "k") visible.length && select(visible[(idx - 1 + visible.length) % visible.length].id);
+  else if (k === "a") decide("error"); else if (k === "r") decide("fine"); else if (k === "u") decide("unsure");
+  else if (k === "o") tog("lyPred"); else if (k === "m") tog("lyPins"); else if (k === "t" && !$("lyTrust").disabled) tog("lyTrust");
+  else if (k === "g") tog("lyRef"); else if (k === "l") tog("lyFocus");
+  else if (k === "w") { inspector.hidden = !inspector.hidden; $("whyStrip").classList.toggle("show", !inspector.hidden && !!selId); }
+});
+
+// ---- controls
+const clearSel = () => { selId = null; $("insp").classList.remove("show"); $("whyStrip").classList.remove("show"); };
+$("model").onchange = () => { clearSel(); load(); };
+$("section").onchange = () => { clearSel(); view.init = 0; load(); };
+["lyPred", "lyFlags", "lyRef", "lyTrust", "lyPins", "lyFocus"].forEach(id => $(id).onchange = layers);
+["minP", "hideDone", "showCheck"].forEach(id => $(id).oninput = render);
+document.querySelectorAll("[data-sort]").forEach(b => b.onclick = () => { sortBy = b.dataset.sort;
+  document.querySelectorAll("[data-sort]").forEach(x => x.classList.toggle("on", x === b)); render(); });
+const setCh = c => { channel = c; $("chPolyt").classList.toggle("on", c === "polyt"); $("chDapi").classList.toggle("on", c === "dapi");
+  $("imgBase").src = `data/sections/${$("section").value}/${c}.jpg`; };
+$("chPolyt").onclick = () => setCh("polyt"); $("chDapi").onclick = () => setCh("dapi");
+$("startBtn").onclick = () => { const n = visible.find(i => !DEC[i.id]) || visible[0]; if (n) select(n.id); };
+$("resetBtn").onclick = () => { if (confirm("Clear your decisions for this model and section?")) { DEC = {}; store.set(decKey(), DEC); render(); } };
+$("exportBtn").onclick = () => {
+  const q = s => `"${String(s ?? "").replace(/"/g, '""')}"`;
+  const rows = [["model", "section", "rank", "flag_id", "type", "investigator_score", "x_fullres", "y_fullres", "count_delta",
+                 "reason", "suggested_fix", "your_decision", "your_note", "decided_at"]];
+  (REVIEW.items || []).forEach(i => rows.push([$("model").value, $("section").value, i.rank, i.id, i.type, i.p,
+    Math.round(i.x * 2), Math.round(i.y * 2), i.count_delta, i.reason, i.fix, DEC[i.id]?.d || "", DEC[i.id]?.note || "", DEC[i.id]?.t || ""]));
+  const blob = new Blob([rows.map(r => r.map(q).join(",")).join("\n")], {type: "text/csv"});
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = `review_${$("model").value}_${$("section").value}.csv`; a.click(); URL.revokeObjectURL(a.href);
+};
+
+$("whyClose").onclick = () => { inspector.hidden = true; $("whyStrip").classList.remove("show"); };
+$("whyStrip").addEventListener("mousedown", e => e.stopPropagation());
+
+// ---- flag guide
+$("guideBtn").onclick = () => {
+  const rel = (REVIEW && REVIEW.reliability) || {};
+  $("guideBody").innerHTML = Object.entries(TYPES).map(([k, t]) => `<div class="grow">${schematic(k, 66)}
+    <div><h3><span class="dot" style="background:${t.color}"></span>${t.label}
+      <span class="info" style="font-weight:400">· ${FAMILIES[t.family].label}${rel[k] ? ` · real ${pct(rel[k].confirmed_rate)} of the time (n=${rel[k].n})` : ""}</span></h3>
+      <div class="info">${t.look}</div>
+      <div class="info"><b>Evidence shown:</b> ${t.panels.map(p => p.t).join(" → ")}</div></div></div>`).join("");
+  $("guide").showModal();
+};
+
+// ---- live run + status
+$("runBtn").onclick = async () => {
+  $("runBtn").disabled = true;
+  const r = await fetch("/api/run", {method: "POST", body: JSON.stringify({exp: INDEX.live_exp || "E2", sample: $("section").value})});
+  if (!r.ok) $("liveMsg").textContent = "Could not start: " + (await r.json()).error;
+};
+let lastLive = "";
+async function poll() {
+  try {
+    const st = await getJSON("/api/status"), tr = st.training, tp = $("trainPill");
+    tp.innerHTML = tr.running ? `<span class="dot" style="background:var(--warn)"></span>Training <b>${tr.dataset}</b> · epoch ~${Math.floor(tr.epoch_estimate ?? 0)}/${tr.n_epochs}${tr.eta ? ` · done ~${tr.eta}` : ""}`
+                              : `<span class="dot" style="background:var(--ok)"></span>GPU free`;
+    $("ramPill").textContent = `RAM free ${(st.ram_mb / 1024).toFixed(1)} GB`;
+    const lv = st.live || {}; $("runBtn").disabled = !st.live_allowed;
+    const prog = $("liveProg");
+    if (st.live_busy || lv.state === "running") {
+      $("liveMsg").textContent = `${lv.exp || ""} on ${lv.sample || ""}: ${lv.step || "starting"}…`; prog.style.display = "block";
+      const k = ["loading", "segmenting", "investigating", "rendering"].findIndex(s => (lv.step || "").startsWith(s));
+      prog.firstElementChild.style.width = `${Math.max(8, 25 * (k + 1))}%`;
+    } else {
+      prog.style.display = "none";
+      $("liveMsg").innerHTML = lv.state === "done" ? `<span class="okc">✓ ${lv.step}</span> (${lv.seconds}s) — pick “${lv.exp} (live)” above.`
+        : lv.state === "failed" ? `<span class="notice">Live run failed: ${lv.error}</span>`
+        : (st.live_blocked_reason ? `<span class="notice">${st.live_blocked_reason}</span>` : "Ready.");
+    }
+    const sig = `${lv.state}-${lv.updated}`;
+    if (lv.state === "done" && sig !== lastLive && lastLive) { lastLive = sig; await init(); } else lastLive = sig;
+  } catch (e) { /* server restarting */ }
+  setTimeout(poll, 5000);
+}
+init().then(() => {
+  $("trainPill").innerHTML = `<span class="dot" style="background:var(--accent)"></span>Demo`;
+  $("ramPill").textContent = "Saved results";
+  $("runBtn").disabled = true;
+  $("liveMsg").innerHTML = `<span class="notice">Live runs need the local app with a GPU.</span>`;
+});
+</script>
+</body>
+</html>
